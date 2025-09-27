@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.mhduiy.androidtoolsserver">
+
+    <!-- 最小化的 manifest，只用于编译，不包含任何 Activity 或资源 -->
+
+</manifest>
+

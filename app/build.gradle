@@ -1,0 +1,104 @@
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    compileSdk 34
+    namespace 'com.mhduiy.androidtoolsserver'
+
+    defaultConfig {
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // 跳过资源处理，因为 app_process 不需要资源文件
+            shrinkResources false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+        encoding = 'UTF-8'
+    }
+
+    // 排除资源文件夹，只编译 Java 代码
+    sourceSets {
+        main {
+            java {
+                srcDirs = ['src/main/java']
+            }
+            // 明确排除资源文件夹
+            res.srcDirs = []
+            assets.srcDirs = []
+            manifest.srcFile 'src/main/AndroidManifest_minimal.xml'
+        }
+    }
+
+    // 跳过资源验证任务
+    tasks.whenTaskAdded { task ->
+        if (task.name.contains('verifyReleaseResources') ||
+            task.name.contains('processReleaseResources') ||
+            task.name.contains('generateReleaseResources')) {
+            task.enabled = false
+        }
+    }
+}
+
+dependencies {
+    // 如果需要其他依赖可以在这里添加
+}
+
+task createJar(type: Jar, dependsOn: 'compileReleaseJavaWithJavac') {
+    archiveBaseName = "system-info-server"
+    archiveVersion = "1.0.0"
+    destinationDirectory = file("$buildDir/libs")
+
+    // 正确的路径
+    from("$buildDir/intermediates/javac/release/compileReleaseJavaWithJavac/classes")
+}
+
+
+// 自定义任务：直接编译 Java 代码为 DEX
+task generateDexForAppProcess(dependsOn: 'createJar') {
+    description = 'Generate DEX file for app_process execution'
+    group = 'build'
+
+    doLast {
+        // 确保输出目录存在
+        file("$buildDir/libs").mkdirs()
+
+        def classesDir = "$buildDir/intermediates/javac/release/classes"
+        def dexOutputDir = "$buildDir/libs"
+        def androidSdk = android.sdkDirectory
+        def buildTools = android.buildToolsVersion
+
+        file(dexOutputDir).mkdirs()
+
+        def d8Path = "${androidSdk}/build-tools/${buildTools}/${org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'd8.bat' : 'd8'}"
+        def jarPath = "$buildDir/libs/system-info-server-1.0.0.jar"
+
+        exec {
+            commandLine d8Path,
+                    "--output", dexOutputDir,
+                    "--lib", "${androidSdk}/platforms/android-${android.compileSdk}/android.jar",
+                    "--min-api", "21",
+                    jarPath
+        }
+
+        def dexFile = file("$dexOutputDir/classes.dex")
+        def finalDex = file("$dexOutputDir/androidtools-server")
+
+        if (dexFile.exists()) {
+            dexFile.renameTo(finalDex)
+            println "✅ DEX file generated at: $finalDex"
+        } else {
+            throw new GradleException("❌ DEX generation failed, classes.dex not found in $dexOutputDir")
+        }
+    }
+}

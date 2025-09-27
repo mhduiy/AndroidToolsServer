@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CopilotDiffPersistence">
+    <option name="pendingDiffs">
+      <map>
+        <entry key="$PROJECT_DIR$/app/src/main/java/com/systeminfo/server/TestServer.java">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="$PROJECT_DIR$/app/src/main/java/com/systeminfo/server/TestServer.java" />
+              <option name="originalContent" value="package com.systeminfo.server;&#10;&#10;/**&#10; * 极简测试服务器&#10; */&#10;public class TestServer {&#10;    public static void main(String[] args) {&#10;        System.out.println(&quot;Hello from TestServer&quot;);&#10;        System.out.flush();&#10;&#10;        // 只做最基本的操作，不使用任何可能有问题的API&#10;        try {&#10;            for (int i = 0; i &lt; 5; i++) {&#10;                System.out.println(&quot;Count: &quot; + i);&#10;                System.out.flush();&#10;                Thread.sleep(1000);&#10;            }&#10;            System.out.println(&quot;Test completed successfully&quot;);&#10;        } catch (Exception e) {&#10;            System.err.println(&quot;Error: &quot; + e);&#10;            e.printStackTrace();&#10;        }&#10;    }&#10;}&#10;" />
+              <option name="updatedContent" value="package com.mhduiy.androidtoolsserver;&#10;&#10;/**&#10; * 极简测试服务器&#10; */&#10;public class TestServer {&#10;    public static void main(String[] args) {&#10;        System.out.println(&quot;Hello from TestServer&quot;);&#10;        System.out.flush();&#10;&#10;        // 只做最基本的操作，不使用任何可能有问题的API&#10;        try {&#10;            for (int i = 0; i &lt; 5; i++) {&#10;                System.out.println(&quot;Count: &quot; + i);&#10;                System.out.flush();&#10;                Thread.sleep(1000);&#10;            }&#10;            System.out.println(&quot;Test completed successfully&quot;);&#10;        } catch (Exception e) {&#10;            System.err.println(&quot;Error: &quot; + e);&#10;            e.printStackTrace();&#10;        }&#10;    }&#10;}" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>
