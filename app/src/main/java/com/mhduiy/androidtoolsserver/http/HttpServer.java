@@ -135,8 +135,22 @@ public class HttpServer {
                     cpuJson.add("architecture", cpuInfo.architecture);
                     cpuJson.add("coreCount", cpuInfo.coreCount);
                     cpuJson.add("currentUsage", Math.round(cpuInfo.currentUsage * 100.0) / 100.0);
-                    cpuJson.add("coreUsages", cpuInfo.coreUsages);
-                    cpuJson.add("frequencies", cpuInfo.frequencies);
+
+                    // 添加各个核心的详细信息作为JSON对象数组
+                    StringBuilder coresJson = new StringBuilder();
+                    coresJson.append("[");
+                    for (int i = 0; i < cpuInfo.cores.size(); i++) {
+                        CPUMonitor.CpuCoreInfo core = cpuInfo.cores.get(i);
+                        if (i > 0) coresJson.append(",");
+                        coresJson.append("{")
+                                .append("\"coreId\":").append(core.coreId).append(",")
+                                .append("\"usage\":").append(Math.round(core.usage * 100.0) / 100.0).append(",")
+                                .append("\"frequency\":").append(core.frequency)
+                                .append("}");
+                    }
+                    coresJson.append("]");
+
+                    cpuJson.add("cores", coresJson.toString(), false); // false表示不加引号，直接作为JSON对象
                     cpuJson.add("temperature", cpuInfo.temperature);
                     cpuJson.add("maxFrequency", cpuInfo.maxFrequency);
                     cpuJson.add("minFrequency", cpuInfo.minFrequency);

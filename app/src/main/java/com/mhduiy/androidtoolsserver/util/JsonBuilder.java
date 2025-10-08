@@ -40,6 +40,17 @@ public class JsonBuilder {
         return this;
     }
 
+    public JsonBuilder add(String key, String value, boolean escapeValue) {
+        addComma();
+        sb.append("\"").append(key).append("\":");
+        if (escapeValue) {
+            sb.append("\"").append(escapeJson(value)).append("\"");
+        } else {
+            sb.append(value); // 直接添加原始JSON字符串
+        }
+        return this;
+    }
+
     public JsonBuilder add(String key, List<?> list) {
         addComma();
         sb.append("\"").append(key).append("\":[");

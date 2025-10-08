@@ -22,6 +22,21 @@ public class CPUMonitor {
     private long lastStatTime = 0;
 
     /**
+     * 单个CPU核心信息类
+     */
+    public static class CpuCoreInfo {
+        public int coreId;
+        public double usage;
+        public int frequency; // MHz
+
+        public CpuCoreInfo(int coreId, double usage, int frequency) {
+            this.coreId = coreId;
+            this.usage = usage;
+            this.frequency = frequency;
+        }
+    }
+
+    /**
      * CPU信息类
      */
     public static class CpuInfo {
@@ -31,6 +46,7 @@ public class CPUMonitor {
         public double currentUsage = 0.0;  // 总体CPU使用率
         public List<Double> coreUsages = new ArrayList<>();  // 各核心使用率
         public List<Integer> frequencies = new ArrayList<>();  // 各核心频率(MHz)
+        public List<CpuCoreInfo> cores = new ArrayList<>();  // 核心详细信息
         public int temperature = -1;  // CPU温度(摄氏度)
         public int maxFrequency = 0;  // 最大频率
         public int minFrequency = 0;  // 最小频率
@@ -63,7 +79,11 @@ public class CPUMonitor {
 
             // 获取CPU使用率
             CpuStat currentStat = getCurrentCpuStat();
-            if (currentStat != null && lastCpuStat != null) {
+            if (lastCpuStat == null) {
+                lastCpuStat = currentStat;
+            }
+
+            if (currentStat != null) {
                 calculateCpuUsage(cpuInfo, lastCpuStat, currentStat);
                 lastCpuStat = currentStat;
                 lastStatTime = System.currentTimeMillis();
@@ -71,6 +91,9 @@ public class CPUMonitor {
 
             // 获取CPU频率信息
             getCpuFrequencies(cpuInfo);
+
+            // 生成核心详细信息
+            generateCoreInfoList(cpuInfo);
 
             // 获取CPU温度
             cpuInfo.temperature = getCpuTemperature();
@@ -95,7 +118,7 @@ public class CPUMonitor {
                 if (parts.length > 1) {
                     processors.add(parts[1].trim());
                 }
-            } else if (line.startsWith("model name")) {
+            } else if (line.startsWith("model name") || line.startsWith("Hardware")) {
                 String[] parts = line.split(":", 2);
                 if (parts.length > 1) {
                     cpuInfo.model = parts[1].trim();
@@ -274,5 +297,18 @@ public class CPUMonitor {
             }
         }
         return Math.max(count, 1);
+    }
+
+    /**
+     * 生成核心详细信息列表
+     */
+    private void generateCoreInfoList(CpuInfo cpuInfo) {
+        cpuInfo.cores.clear();
+        int coreCount = Math.min(cpuInfo.coreUsages.size(), cpuInfo.frequencies.size());
+        for (int i = 0; i < coreCount; i++) {
+            double usage = cpuInfo.coreUsages.get(i);
+            int frequency = cpuInfo.frequencies.get(i);
+            cpuInfo.cores.add(new CpuCoreInfo(i, usage, frequency));
+        }
     }
 }
