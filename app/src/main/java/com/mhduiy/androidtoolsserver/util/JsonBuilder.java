@@ -1,94 +1,142 @@
 package com.mhduiy.androidtoolsserver.util;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
 
-/**
- * JSON构建器工具类，用于构建JSON字符串
- */
 public class JsonBuilder {
-    private final Map<String, Object> data = new HashMap<>();
+    private StringBuilder sb = new StringBuilder();
 
-    public JsonBuilder put(String key, Object value) {
-        data.put(key, value);
-        return this;
-    }
-
-    public JsonBuilder putRaw(String key, String jsonValue) {
-        // 用于直接插入已经是JSON格式的字符串
-        data.put(key, new RawJson(jsonValue));
-        return this;
-    }
-
-    public String build() {
-        StringBuilder sb = new StringBuilder();
+    public JsonBuilder() {
         sb.append("{");
+    }
 
-        boolean first = true;
-        for (Map.Entry<String, Object> entry : data.entrySet()) {
-            if (!first) {
-                sb.append(",");
+    public JsonBuilder add(String key, String value) {
+        addComma();
+        sb.append("\"").append(key).append("\":\"").append(escapeJson(value)).append("\"");
+        return this;
+    }
+
+    public JsonBuilder add(String key, int value) {
+        addComma();
+        sb.append("\"").append(key).append("\":").append(value);
+        return this;
+    }
+
+    public JsonBuilder add(String key, long value) {
+        addComma();
+        sb.append("\"").append(key).append("\":").append(value);
+        return this;
+    }
+
+    public JsonBuilder add(String key, double value) {
+        addComma();
+        sb.append("\"").append(key).append("\":").append(value);
+        return this;
+    }
+
+    public JsonBuilder add(String key, boolean value) {
+        addComma();
+        sb.append("\"").append(key).append("\":").append(value);
+        return this;
+    }
+
+    public JsonBuilder add(String key, List<?> list) {
+        addComma();
+        sb.append("\"").append(key).append("\":[");
+        for (int i = 0; i < list.size(); i++) {
+            if (i > 0) sb.append(",");
+            Object item = list.get(i);
+            if (item instanceof String) {
+                sb.append("\"").append(escapeJson((String) item)).append("\"");
+            } else {
+                sb.append(item);
             }
-            first = false;
-
-            sb.append("\"").append(escapeJson(entry.getKey())).append("\":");
-            appendValue(sb, entry.getValue());
         }
-
-        sb.append("}");
-        return sb.toString();
+        sb.append("]");
+        return this;
     }
 
-    public Object buildObject() {
-        return new HashMap<>(data);
+    public JsonBuilder add(String key, Map<String, Object> map) {
+        addComma();
+        sb.append("\"").append(key).append("\":");
+        sb.append(mapToJson(map));
+        return this;
     }
 
-    private void appendValue(StringBuilder sb, Object value) {
-        if (value == null) {
-            sb.append("null");
-        } else if (value instanceof RawJson) {
-            sb.append(((RawJson) value).json);
-        } else if (value instanceof String) {
-            sb.append("\"").append(escapeJson((String) value)).append("\"");
-        } else if (value instanceof Number || value instanceof Boolean) {
-            sb.append(value.toString());
-        } else if (value instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> map = (Map<String, Object>) value;
-            sb.append("{");
-            boolean first = true;
-            for (Map.Entry<String, Object> entry : map.entrySet()) {
-                if (!first) {
-                    sb.append(",");
+    private String mapToJson(Map<String, Object> map) {
+        StringBuilder mapSb = new StringBuilder();
+        mapSb.append("{");
+        boolean first = true;
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            if (!first) mapSb.append(",");
+            first = false;
+            mapSb.append("\"").append(entry.getKey()).append("\":");
+            Object value = entry.getValue();
+            if (value instanceof String) {
+                mapSb.append("\"").append(escapeJson((String) value)).append("\"");
+            } else if (value instanceof Map) {
+                mapSb.append(mapToJson((Map<String, Object>) value));
+            } else if (value instanceof List) {
+                List<?> list = (List<?>) value;
+                mapSb.append("[");
+                for (int i = 0; i < list.size(); i++) {
+                    if (i > 0) mapSb.append(",");
+                    Object item = list.get(i);
+                    if (item instanceof String) {
+                        mapSb.append("\"").append(escapeJson((String) item)).append("\"");
+                    } else {
+                        mapSb.append(item);
+                    }
                 }
-                first = false;
-                sb.append("\"").append(escapeJson(entry.getKey())).append("\":");
-                appendValue(sb, entry.getValue());
+                mapSb.append("]");
+            } else {
+                mapSb.append(value);
             }
-            sb.append("}");
-        } else {
-            // Default to string representation
-            sb.append("\"").append(escapeJson(value.toString())).append("\"");
+        }
+        mapSb.append("}");
+        return mapSb.toString();
+    }
+
+    private void addComma() {
+        if (sb.length() > 1) {
+            sb.append(",");
         }
     }
 
     private String escapeJson(String str) {
         if (str == null) return "";
-
         return str.replace("\\", "\\\\")
                   .replace("\"", "\\\"")
-                  .replace("\b", "\\b")
-                  .replace("\f", "\\f")
                   .replace("\n", "\\n")
                   .replace("\r", "\\r")
                   .replace("\t", "\\t");
     }
 
-    private static class RawJson {
-        final String json;
+    public String build() {
+        sb.append("}");
+        return sb.toString();
+    }
 
-        RawJson(String json) {
-            this.json = json;
+    public static String fromMap(Map<String, Object> map) {
+        JsonBuilder builder = new JsonBuilder();
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String) {
+                builder.add(entry.getKey(), (String) value);
+            } else if (value instanceof Integer) {
+                builder.add(entry.getKey(), (Integer) value);
+            } else if (value instanceof Long) {
+                builder.add(entry.getKey(), (Long) value);
+            } else if (value instanceof Double) {
+                builder.add(entry.getKey(), (Double) value);
+            } else if (value instanceof Boolean) {
+                builder.add(entry.getKey(), (Boolean) value);
+            } else if (value instanceof List) {
+                builder.add(entry.getKey(), (List<?>) value);
+            } else if (value instanceof Map) {
+                builder.add(entry.getKey(), (Map<String, Object>) value);
+            }
         }
+        return builder.build();
     }
 }

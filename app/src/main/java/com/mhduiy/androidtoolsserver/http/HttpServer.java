@@ -1,19 +1,18 @@
 package com.mhduiy.androidtoolsserver.http;
 
+import com.mhduiy.androidtoolsserver.monitor.CPUMonitor;
+import com.mhduiy.androidtoolsserver.monitor.FrontendAppMonitor;
+import com.mhduiy.androidtoolsserver.monitor.GPUMonitor;
+import com.mhduiy.androidtoolsserver.monitor.MemoryMonitor;
 import com.mhduiy.androidtoolsserver.monitor.SystemMonitor;
 import com.mhduiy.androidtoolsserver.util.Logger;
 import com.mhduiy.androidtoolsserver.util.JsonBuilder;
 
-// Android SDK导入
-import android.os.Build;
-import android.os.Process;
-import android.os.SystemClock;
-
 import java.io.*;
 import java.net.*;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * HTTP服务器，处理系统信息API请求
@@ -24,206 +23,264 @@ public class HttpServer {
     private final int port;
     private final SystemMonitor systemMonitor;
     private ServerSocket serverSocket;
-    private ExecutorService threadPool;
-    private final AtomicBoolean running = new AtomicBoolean(false);
+    private ExecutorService executor;
+    private volatile boolean running = false;
 
     public HttpServer(int port, SystemMonitor systemMonitor) {
         this.port = port;
         this.systemMonitor = systemMonitor;
-        this.threadPool = Executors.newFixedThreadPool(10);
+        this.executor = Executors.newFixedThreadPool(10);
     }
 
     public void start() throws IOException {
         serverSocket = new ServerSocket(port);
-        running.set(true);
+        running = true;
 
-        new Thread(this::serverLoop, "HttpServer").start();
-        Logger.i(TAG, "HTTP Server started on port: " + port);
+        Logger.i(TAG, "HTTP Server started on port " + port);
+
+        // 启动接受连接的线程
+        new Thread(this::acceptConnections).start();
     }
 
     public void stop() {
-        running.set(false);
-        if (serverSocket != null && !serverSocket.isClosed()) {
-            try {
+        running = false;
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
                 serverSocket.close();
-            } catch (IOException e) {
-                Logger.e(TAG, "Error closing server socket: " + e.getMessage());
             }
+            if (executor != null) {
+                executor.shutdown();
+            }
+        } catch (IOException e) {
+            Logger.e(TAG, "Error stopping HTTP server", e);
         }
-        if (threadPool != null) {
-            threadPool.shutdownNow();
-        }
-        Logger.i(TAG, "HTTP Server stopped");
     }
 
-    private void serverLoop() {
-        while (running.get() && !serverSocket.isClosed()) {
+    private void acceptConnections() {
+        while (running) {
             try {
                 Socket clientSocket = serverSocket.accept();
-                threadPool.submit(() -> handleClient(clientSocket));
+                executor.submit(() -> handleClient(clientSocket));
             } catch (IOException e) {
-                if (running.get()) {
-                    Logger.e(TAG, "Error accepting client connection: " + e.getMessage());
+                if (running) {
+                    Logger.e(TAG, "Error accepting connection", e);
                 }
             }
         }
     }
 
     private void handleClient(Socket clientSocket) {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-             PrintWriter writer = new PrintWriter(clientSocket.getOutputStream(), true)) {
+        try {
+            BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+            PrintWriter writer = new PrintWriter(clientSocket.getOutputStream(), true);
 
+            // 读取HTTP请求行
             String requestLine = reader.readLine();
             if (requestLine == null) return;
 
             Logger.d(TAG, "Request: " + requestLine);
 
-            // 简单的HTTP请求解析
-            String[] parts = requestLine.split(" ");
-            if (parts.length < 2) {
-                sendErrorResponse(writer, 400, "Bad Request");
-                return;
-            }
-
-            String method = parts[0];
-            String path = parts[1];
-
             // 跳过HTTP头部
             String line;
             while ((line = reader.readLine()) != null && !line.isEmpty()) {
-                // 跳过头部行
+                // 读取并忽略HTTP头部
             }
 
-            if (!"GET".equals(method)) {
-                sendErrorResponse(writer, 405, "Method Not Allowed");
-                return;
-            }
+            // 解析请求
+            String[] requestParts = requestLine.split(" ");
+            if (requestParts.length >= 2) {
+                String method = requestParts[0];
+                String path = requestParts[1];
 
-            handleGetRequest(path, writer);
+                if ("GET".equals(method)) {
+                    handleGetRequest(writer, path);
+                } else {
+                    sendErrorResponse(writer, 405, "Method Not Allowed");
+                }
+            } else {
+                sendErrorResponse(writer, 400, "Bad Request");
+            }
 
         } catch (IOException e) {
-            Logger.e(TAG, "Error handling client: " + e.getMessage());
+            Logger.e(TAG, "Error handling client", e);
         } finally {
             try {
                 clientSocket.close();
             } catch (IOException e) {
-                Logger.e(TAG, "Error closing client socket: " + e.getMessage());
+                Logger.w(TAG, "Error closing client socket", e);
             }
         }
     }
 
-    private void handleGetRequest(String path, PrintWriter writer) {
-        String response = "";
+    private void handleGetRequest(PrintWriter writer, String path) {
+        String response;
+        String contentType = "application/json";
 
         try {
             switch (path) {
                 case "/":
                 case "/status":
-                    response = createStatusResponse();
+                    response = new JsonBuilder()
+                        .add("status", "running")
+                        .add("service", "AndroidToolsServer")
+                        .add("version", "1.0.0")
+                        .add("timestamp", System.currentTimeMillis())
+                        .build();
                     break;
-                case "/androidapi":
-                    response = testAndroidApiAccess();
-                    break;
+
                 case "/cpu":
-                    response = systemMonitor.getCpuInfo();
+                    CPUMonitor.CpuInfo cpuInfo = systemMonitor.getCpuInfo();
+                    JsonBuilder cpuJson = new JsonBuilder();
+                    cpuJson.add("model", cpuInfo.model);
+                    cpuJson.add("architecture", cpuInfo.architecture);
+                    cpuJson.add("coreCount", cpuInfo.coreCount);
+                    cpuJson.add("currentUsage", Math.round(cpuInfo.currentUsage * 100.0) / 100.0);
+                    cpuJson.add("coreUsages", cpuInfo.coreUsages);
+                    cpuJson.add("frequencies", cpuInfo.frequencies);
+                    cpuJson.add("temperature", cpuInfo.temperature);
+                    cpuJson.add("maxFrequency", cpuInfo.maxFrequency);
+                    cpuJson.add("minFrequency", cpuInfo.minFrequency);
+                    cpuJson.add("timestamp", System.currentTimeMillis());
+                    response = cpuJson.build();
                     break;
-                case "/gpu":
-                    response = systemMonitor.getGpuInfo();
-                    break;
+
                 case "/memory":
-                    response = systemMonitor.getMemoryInfo();
+                    MemoryMonitor.MemInfo memInfo = systemMonitor.getMemoryInfo();
+                    JsonBuilder memJson = new JsonBuilder();
+                    memJson.add("totalMemory", memInfo.totalMemory);
+                    memJson.add("availableMemory", memInfo.availableMemory);
+                    memJson.add("usedMemory", memInfo.usedMemory);
+                    memJson.add("memoryUsageRatio", Math.round(memInfo.memoryUsageRatio * 10000.0) / 100.0);
+                    memJson.add("threshold", memInfo.threshold);
+                    memJson.add("lowMemory", memInfo.lowMemory);
+                    memJson.add("totalStorage", memInfo.totalStorage);
+                    memJson.add("availableStorage", memInfo.availableStorage);
+                    memJson.add("usedStorage", memInfo.usedStorage);
+                    memJson.add("timestamp", System.currentTimeMillis());
+                    response = memJson.build();
                     break;
-                case "/battery":
-                    response = systemMonitor.getBatteryInfo();
+
+                case "/gpu":
+                    GPUMonitor.GpuInfo gpuInfo = systemMonitor.getGpuInfo();
+                    JsonBuilder gpuJson = new JsonBuilder();
+                    gpuJson.add("name", gpuInfo.name);
+                    gpuJson.add("vendor", gpuInfo.vendor);
+                    gpuJson.add("renderer", gpuInfo.renderer);
+                    gpuJson.add("version", gpuInfo.version);
+                    gpuJson.add("currentFrequency", gpuInfo.currentFrequency);
+                    gpuJson.add("maxFrequency", gpuInfo.maxFrequency);
+                    gpuJson.add("minFrequency", gpuInfo.minFrequency);
+                    gpuJson.add("usage", Math.round(gpuInfo.usage * 100.0) / 100.0);
+                    gpuJson.add("temperature", gpuInfo.temperature);
+                    gpuJson.add("timestamp", System.currentTimeMillis());
+                    response = gpuJson.build();
                     break;
-                case "/display":
-                    response = systemMonitor.getDisplayInfo();
+
+                case "/current-app":
+                case "/current":
+                    FrontendAppMonitor.FrontendAppInfo currentApp = systemMonitor.getFrontendAppInfo();
+                    JsonBuilder currentAppJson = new JsonBuilder();
+                    currentAppJson.add("packageName", currentApp.packageName);
+                    currentAppJson.add("appName", currentApp.appName);
+                    currentAppJson.add("activityName", currentApp.activityName);
+                    currentAppJson.add("version", currentApp.version);
+                    currentAppJson.add("versionCode", currentApp.versionCode);
+                    currentAppJson.add("memoryUsageMB", currentApp.memoryUsageMB);
+                    currentAppJson.add("cpuUsage", Math.round(currentApp.cpuUsage * 100.0) / 100.0);
+                    currentAppJson.add("fps", currentApp.fps);
+                    currentAppJson.add("pid", currentApp.pid);
+                    currentAppJson.add("uid", currentApp.uid);
+                    currentAppJson.add("isSystemApp", currentApp.isSystemApp);
+                    currentAppJson.add("iconBase64", currentApp.iconBase64);
+                    currentAppJson.add("installTime", currentApp.installTime);
+                    currentAppJson.add("lastUpdateTime", currentApp.lastUpdateTime);
+                    currentAppJson.add("timestamp", currentApp.timestamp);
+                    response = currentAppJson.build();
                     break;
+
                 case "/system":
-                    response = systemMonitor.getSystemInfo();
+                case "/summary":
+                    Map<String, Object> summary = systemMonitor.getSystemSummary();
+                    response = JsonBuilder.fromMap(summary);
                     break;
-                case "/all":
-                    response = systemMonitor.getAllInfo();
+
+                case "/api":
+                    contentType = "text/html";
+                    response = getApiDocumentation();
                     break;
+
                 default:
                     sendErrorResponse(writer, 404, "Not Found");
                     return;
             }
 
-            sendJsonResponse(writer, response);
+            sendSuccessResponse(writer, response, contentType);
 
         } catch (Exception e) {
-            Logger.e(TAG, "Error processing request for path: " + path + ", error: " + e.getMessage());
-            sendErrorResponse(writer, 500, "Internal Server Error");
+            Logger.e(TAG, "Error processing request: " + path, e);
+            sendErrorResponse(writer, 500, "Internal Server Error: " + e.getMessage());
         }
     }
 
-    private String createStatusResponse() {
-        return new JsonBuilder()
-                .put("status", "running")
-                .put("server", "SystemInfoServer")
-                .put("version", "1.0.0")
-                .put("timestamp", System.currentTimeMillis())
-                .build();
-    }
-
-    private void sendJsonResponse(PrintWriter writer, String json) {
+    private void sendSuccessResponse(PrintWriter writer, String content, String contentType) {
         writer.println("HTTP/1.1 200 OK");
-        writer.println("Content-Type: application/json; charset=utf-8");
+        writer.println("Content-Type: " + contentType + "; charset=utf-8");
+        writer.println("Content-Length: " + content.getBytes().length);
         writer.println("Access-Control-Allow-Origin: *");
-        writer.println("Connection: close");
-        writer.println("Content-Length: " + json.getBytes().length);
+        writer.println("Access-Control-Allow-Methods: GET, POST, OPTIONS");
+        writer.println("Access-Control-Allow-Headers: Content-Type");
         writer.println();
-        writer.println(json);
+        writer.println(content);
+        writer.flush();
     }
 
     private void sendErrorResponse(PrintWriter writer, int statusCode, String statusText) {
-        String json = new JsonBuilder()
-                .put("error", statusText)
-                .put("code", statusCode)
-                .put("timestamp", System.currentTimeMillis())
-                .build();
+        String errorJson = new JsonBuilder()
+            .add("error", statusText)
+            .add("code", statusCode)
+            .add("timestamp", System.currentTimeMillis())
+            .build();
 
         writer.println("HTTP/1.1 " + statusCode + " " + statusText);
         writer.println("Content-Type: application/json; charset=utf-8");
+        writer.println("Content-Length: " + errorJson.getBytes().length);
         writer.println("Access-Control-Allow-Origin: *");
-        writer.println("Connection: close");
-        writer.println("Content-Length: " + json.getBytes().length);
         writer.println();
-        writer.println(json);
+        writer.println(errorJson);
+        writer.flush();
     }
 
-    private String testAndroidApiAccess() {
-        JsonBuilder result = new JsonBuilder();
-        result.put("test", "Android API Access Test");
-        result.put("timestamp", System.currentTimeMillis());
-
-        // 测试Android Build类直接访问
-        try {
-            android.os.Build build = new android.os.Build();
-
-            JsonBuilder buildInfo = new JsonBuilder();
-            buildInfo.put("manufacturer", android.os.Build.MANUFACTURER);
-            buildInfo.put("model", android.os.Build.MODEL);
-            buildInfo.put("brand", android.os.Build.BRAND);
-            buildInfo.put("device", android.os.Build.DEVICE);
-            buildInfo.put("product", android.os.Build.PRODUCT);
-            buildInfo.put("hardware", android.os.Build.HARDWARE);
-            buildInfo.put("board", android.os.Build.BOARD);
-            buildInfo.put("bootloader", android.os.Build.BOOTLOADER);
-            buildInfo.put("fingerprint", android.os.Build.FINGERPRINT);
-            buildInfo.put("host", android.os.Build.HOST);
-            buildInfo.put("id", android.os.Build.ID);
-            buildInfo.put("display", android.os.Build.DISPLAY);
-            buildInfo.put("user", android.os.Build.USER);
-
-            result.put("build_info", buildInfo.build());
-            result.put("build_info_status", "success");
-        } catch (Exception e) {
-            result.put("build_info_status", "failed");
-            result.put("build_info_error", e.getMessage());
-        }
-
-        return result.build();
+    private String getApiDocumentation() {
+        return "<!DOCTYPE html>" +
+               "<html><head><title>AndroidToolsServer API</title></head>" +
+               "<body>" +
+               "<h1>AndroidToolsServer API Documentation</h1>" +
+               "<h2>Available Endpoints:</h2>" +
+               "<ul>" +
+               "<li><strong>GET /</strong> - Server status</li>" +
+               "<li><strong>GET /status</strong> - Server status (same as /)</li>" +
+               "<li><strong>GET /cpu</strong> - CPU information (model, usage, frequency, temperature)</li>" +
+               "<li><strong>GET /gpu</strong> - GPU information (name, usage, frequency, temperature)</li>" +
+               "<li><strong>GET /memory</strong> - Memory information (total, available, swap)</li>" +
+               "<li><strong>GET /foreground</strong> - Foreground app information (primary app, top processes)</li>" +
+               "<li><strong>GET /app</strong> - Foreground app information (same as /foreground)</li>" +
+               "<li><strong>GET /current-app</strong> - Current foreground app detailed information</li>" +
+               "<li><strong>GET /current</strong> - Current foreground app detailed information (same as /current-app)</li>" +
+               "<li><strong>GET /processes</strong> - 当前运行的所有进程信息</li>" +
+               "<li><strong>GET /system</strong> - Complete system summary</li>" +
+               "<li><strong>GET /summary</strong> - Complete system summary (same as /system)</li>" +
+               "<li><strong>GET /api</strong> - This API documentation</li>" +
+               "</ul>" +
+               "<h2>Response Format:</h2>" +
+               "<p>All responses are in JSON format with CORS headers enabled.</p>" +
+               "<h2>Example Usage:</h2>" +
+               "<pre>" +
+               "curl http://localhost:" + port + "/cpu\n" +
+               "curl http://localhost:" + port + "/gpu\n" +
+               "curl http://localhost:" + port + "/memory\n" +
+               "curl http://localhost:" + port + "/foreground\n" +
+               "curl http://localhost:" + port + "/system" +
+               "</pre>" +
+               "</body></html>";
     }
 }

@@ -1,44 +1,58 @@
 package com.mhduiy.androidtoolsserver.util;
 
+import android.util.Log;
+
 /**
  * 简单的日志工具类
  */
 public class Logger {
-    private static final String TAG_PREFIX = "SystemInfo";
-    private static boolean debugMode = true;
+    private static boolean DEBUG = true;
 
-    public static void setDebugMode(boolean debug) {
-        debugMode = debug;
+    public static void setDebug(boolean debug) {
+        DEBUG = debug;
     }
 
     public static void d(String tag, String message) {
-        if (debugMode) {
-            System.out.println(formatLog("D", tag, message));
+        if (DEBUG) {
+            Log.d(tag, message);
+            System.out.println("[DEBUG] " + tag + ": " + message);
         }
     }
 
     public static void i(String tag, String message) {
-        System.out.println(formatLog("I", tag, message));
-    }
-
-    public static void w(String tag, String message) {
-        System.out.println(formatLog("W", tag, message));
-    }
-
-    public static void e(String tag, String message) {
-        System.err.println(formatLog("E", tag, message));
-    }
-
-    public static void e(String tag, String message, Throwable throwable) {
-        System.err.println(formatLog("E", tag, message));
-        if (throwable != null) {
-            throwable.printStackTrace();
+        if (DEBUG) {
+            Log.i(tag, message);
+            System.out.println("[INFO] " + tag + ": " + message);
         }
     }
 
-    private static String formatLog(String level, String tag, String message) {
-        long timestamp = System.currentTimeMillis();
-        return String.format("[%d] %s/%s-%s: %s",
-                timestamp, level, TAG_PREFIX, tag, message);
+    public static void w(String tag, String message) {
+        if (DEBUG) {
+            Log.w(tag, message);
+            System.out.println("[WARN] " + tag + ": " + message);
+        }
+    }
+
+    public static void w(String tag, String message, Throwable throwable) {
+        if (DEBUG) {
+            Log.w(tag, message);
+            System.out.println("[WARN] " + tag + ": " + message);
+            if (throwable != null) {
+                throwable.printStackTrace();
+            }
+        }
+    }
+
+    public static void e(String tag, String message) {
+        Log.e(tag, message);
+        System.err.println("[ERROR] " + tag + ": " + message);
+    }
+
+    public static void e(String tag, String message, Throwable throwable) {
+        Log.e(tag, message, throwable);
+        System.err.println("[ERROR] " + tag + ": " + message);
+        if (throwable != null) {
+            throwable.printStackTrace();
+        }
     }
 }
