@@ -7,7 +7,17 @@ import com.mhduiy.androidtoolsserver.monitor.MemoryMonitor;
 import com.mhduiy.androidtoolsserver.monitor.SystemMonitor;
 import com.mhduiy.androidtoolsserver.util.Logger;
 import com.mhduiy.androidtoolsserver.util.JsonBuilder;
+import com.mhduiy.androidtoolsserver.util.ContextManager;
 import com.mhduiy.androidtoolsserver.http.HttpServer;
+
+import android.content.Context;
+import android.content.pm.PackageManager;
+import android.os.Looper;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
+import java.io.ByteArrayOutputStream;
 
 import java.util.Map;
 
@@ -212,6 +222,13 @@ public class SystemInfoServer {
         }
     }
 
+    // 获取系统 Context
+    private static Context getSystemContext() throws Exception {
+        Class<?> atClass = Class.forName("android.app.ActivityThread");
+        Object at = atClass.getMethod("systemMain").invoke(null);
+        return (Context) atClass.getMethod("getSystemContext").invoke(at);
+    }
+
     public static void main(String[] args) {
         int port = DEFAULT_PORT;
         if (args.length > 0) {
@@ -224,6 +241,14 @@ public class SystemInfoServer {
 
         try {
             Logger.i(TAG, "Starting SystemInfoServer via app_process...");
+
+            Looper.prepareMainLooper();
+            // 获取系统 Context
+            Context context = getSystemContext();
+
+            // 初始化全局Context管理器
+            ContextManager.initialize(context);
+            Logger.i(TAG, "Context manager initialized successfully");
 
             SystemInfoServer server = new SystemInfoServer(port);
             server.start();
@@ -253,4 +278,3 @@ public class SystemInfoServer {
         }
     }
 }
-

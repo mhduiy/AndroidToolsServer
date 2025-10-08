@@ -1,7 +1,23 @@
 package com.mhduiy.androidtoolsserver.monitor;
 
 import com.mhduiy.androidtoolsserver.util.Logger;
+import com.mhduiy.androidtoolsserver.util.ContextManager;
 
+import android.content.Context;
+import android.content.pm.PackageManager;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
+import android.app.ActivityManager;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
+import android.util.Base64;
+
+import java.io.ByteArrayOutputStream;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -28,10 +44,13 @@ public class FrontendAppMonitor {
     public FrontendAppInfo getInfo() {
         FrontendAppInfo appInfo =  new FrontendAppInfo();
         try {
-            // 获取前台应用包名
-            String foregroundPackage = getForegroundAppPackageName();
-            if (foregroundPackage != null && !foregroundPackage.isEmpty()) {
-                appInfo.packageName = foregroundPackage;
+            // 获取前台应用完整路径
+            String foregroundAppPath = getForegroundAppPath();
+            if (foregroundAppPath != null && !foregroundAppPath.isEmpty()) {
+                // 从完整路径中提取包名
+                String packageName = extractPackageNameFromPath(foregroundAppPath);
+                appInfo.packageName = packageName;
+                appInfo.activityName = foregroundAppPath; // 保存完整的Activity路径
 
                 // 获取应用详细信息
                 getAppDetailsViaReflection(appInfo);
@@ -47,358 +66,165 @@ public class FrontendAppMonitor {
         return appInfo;
     }
 
+    /**
+     * 从完整路径中提取包名
+     * 例如: tv.danmaku.bilibilihd/tv.danmaku.bili.MainActivityV2 -> tv.danmaku.bilibilihd
+     */
+    private String extractPackageNameFromPath(String fullPath) {
+        if (fullPath != null && fullPath.contains("/")) {
+            return fullPath.substring(0, fullPath.indexOf("/"));
+        }
+        return fullPath;
+    }
 
     /**
      * 通过反射获取应用详细信息
      */
     private void getAppDetailsViaReflection(FrontendAppInfo appInfo) {
         try {
-            Object packageManager = getSystemService("package");
-            if (packageManager != null) {
-                Class<?> packageManagerClass = Class.forName("android.content.pm.IPackageManager");
+            PackageManager pm = ContextManager.getPackageManager();
+            if (pm == null) {
+                Logger.w(TAG, "PackageManager is null");
+                return;
+            }
 
-                // 获取PackageInfo
-                java.lang.reflect.Method getPackageInfoMethod = packageManagerClass.getMethod(
-                        "getPackageInfo", String.class, int.class, int.class);
-                Object packageInfo = getPackageInfoMethod.invoke(packageManager, appInfo.packageName, 0, 0); // user 0
+            PackageInfo pkgInfo = pm.getPackageInfo(appInfo.packageName, 0);
+            ApplicationInfo androidAppInfo = pkgInfo.applicationInfo;
 
-                if (packageInfo != null) {
-                    Class<?> packageInfoClass = packageInfo.getClass();
+            appInfo.appName = pm.getApplicationLabel(androidAppInfo).toString();
+            appInfo.version = pkgInfo.versionName;
+            appInfo.versionCode = String.valueOf(pkgInfo.getLongVersionCode());
+            appInfo.isSystemApp = (androidAppInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+            appInfo.installTime = pkgInfo.firstInstallTime;
+            appInfo.lastUpdateTime = pkgInfo.lastUpdateTime;
+            appInfo.uid = androidAppInfo.uid;
 
-                    // 获取版本信息
-                    java.lang.reflect.Field versionNameField = packageInfoClass.getField("versionName");
-                    appInfo.version = (String) versionNameField.get(packageInfo);
+            // 处理应用图标 - 支持多种类型的Drawable
+            Drawable icon = pm.getApplicationIcon(appInfo.packageName);
+            Logger.d(TAG, "Icon type: " + icon.getClass().getSimpleName());
 
-                    java.lang.reflect.Field versionCodeField = packageInfoClass.getField("versionCode");
-                    appInfo.versionCode = String.valueOf(versionCodeField.get(packageInfo));
-
-                    // 获取ApplicationInfo
-                    java.lang.reflect.Field applicationInfoField = packageInfoClass.getField("applicationInfo");
-                    Object applicationInfo = applicationInfoField.get(packageInfo);
-
-                    if (applicationInfo != null) {
-                        Class<?> applicationInfoClass = applicationInfo.getClass();
-
-                        // 获取UID
-                        java.lang.reflect.Field uidField = applicationInfoClass.getField("uid");
-                        appInfo.uid = (Integer) uidField.get(applicationInfo);
-
-                        // 判断是否为系统应用
-                        java.lang.reflect.Field flagsField = applicationInfoClass.getField("flags");
-                        int flags = (Integer) flagsField.get(applicationInfo);
-                        appInfo.isSystemApp = (flags & 1) != 0; // FLAG_SYSTEM = 1
-
-                        // 获取应用标签（应用名称）
-                        getAppNameViaReflection(appInfo, applicationInfo);
-                    }
-
-                    // 获取安装时间
-                    java.lang.reflect.Field firstInstallTimeField = packageInfoClass.getField("firstInstallTime");
-                    appInfo.installTime = (Long) firstInstallTimeField.get(packageInfo);
-
-                    java.lang.reflect.Field lastUpdateTimeField = packageInfoClass.getField("lastUpdateTime");
-                    appInfo.lastUpdateTime = (Long) lastUpdateTimeField.get(packageInfo);
-                }
+            String iconBase64 = drawableToBase64(icon);
+            if (iconBase64 != null) {
+                appInfo.iconBase64 = iconBase64;
+            } else {
+                Logger.w(TAG, "Failed to convert icon to base64");
             }
 
         } catch (Exception e) {
-            Logger.w(TAG, "Failed to get app details via reflection: " + e.getMessage());
+            Logger.w(TAG, "Failed to get app details: " + e.getMessage());
         }
     }
 
     /**
-     * 通过反射获取应用名称
+     * 将Drawable转换为Base64字符串，支持多种类型的Drawable
      */
-    private void getAppNameViaReflection(FrontendAppInfo appInfo, Object applicationInfo) {
+    private String drawableToBase64(Drawable drawable) {
+        if (drawable == null) {
+            return null;
+        }
+
         try {
-            Object packageManager = getSystemService("package");
-            if (packageManager != null && applicationInfo != null) {
-                Class<?> packageManagerClass = Class.forName("android.content.pm.IPackageManager");
+            Bitmap bitmap = null;
 
-                // 获取应用标签
-                java.lang.reflect.Method getApplicationLabelMethod = packageManagerClass.getMethod(
-                        "getApplicationLabel", Class.forName("android.content.pm.ApplicationInfo"));
-                Object label = getApplicationLabelMethod.invoke(packageManager, applicationInfo);
-
-                if (label != null) {
-                    appInfo.appName = label.toString();
+            // 处理不同类型的Drawable
+            if (drawable instanceof BitmapDrawable) {
+                // BitmapDrawable类型
+                BitmapDrawable bitmapDrawable = (BitmapDrawable) drawable;
+                bitmap = bitmapDrawable.getBitmap();
+                if (bitmap != null) {
+                    Logger.d(TAG, "BitmapDrawable - size: " + bitmap.getWidth() + "x" + bitmap.getHeight());
                 }
+            } else {
+                // 其他类型的Drawable（包括AdaptiveIconDrawable）
+                // 通过Canvas绘制到Bitmap
+                int width = drawable.getIntrinsicWidth();
+                int height = drawable.getIntrinsicHeight();
+
+                // 设置默认尺寸，防止无效尺寸
+                if (width <= 0 || height <= 0) {
+                    width = height = 144; // 默认144x144像素
+                }
+
+                Logger.d(TAG, "Non-BitmapDrawable (" + drawable.getClass().getSimpleName() + ") - creating bitmap: " + width + "x" + height);
+
+                bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(bitmap);
+                drawable.setBounds(0, 0, width, height);
+                drawable.draw(canvas);
             }
+
+            if (bitmap == null) {
+                Logger.w(TAG, "Failed to get bitmap from drawable");
+                return null;
+            }
+
+            // 转换为Base64
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos);
+            byte[] bytes = baos.toByteArray();
+
+            Logger.d(TAG, "Bitmap compressed to " + bytes.length + " bytes");
+            return Base64.encodeToString(bytes, Base64.NO_WRAP);
+
         } catch (Exception e) {
-            Logger.w(TAG, "Failed to get app name via reflection: " + e.getMessage());
-            // 如果获取失败，使用包名作为应用名
-            appInfo.appName = appInfo.packageName;
+            Logger.e(TAG, "Error converting drawable to base64: " + e.getMessage(), e);
+            return null;
         }
     }
 
     /**
-     * 通过反射获取应用内存使用情况
+     * 获取应用内存使用情况
      */
     private void getAppMemoryUsageViaReflection(FrontendAppInfo appInfo) {
-        try {
-            Object activityManager = getSystemService("activity");
-            if (activityManager != null) {
-                Class<?> activityManagerClass = Class.forName("android.app.IActivityManager");
 
-                // 获取运行进程列表
-                java.lang.reflect.Method getRunningAppProcessesMethod = activityManagerClass.getMethod("getRunningAppProcesses");
-                @SuppressWarnings("unchecked")
-                java.util.List<Object> runningProcesses = (java.util.List<Object>) getRunningAppProcessesMethod.invoke(activityManager);
-
-                if (runningProcesses != null) {
-                    for (Object processInfo : runningProcesses) {
-                        Class<?> processInfoClass = processInfo.getClass();
-
-                        // 获取进程的包列表
-                        java.lang.reflect.Field pkgListField = processInfoClass.getField("pkgList");
-                        String[] pkgList = (String[]) pkgListField.get(processInfo);
-
-                        // 检查是否包含目标包名
-                        boolean containsPackage = false;
-                        if (pkgList != null) {
-                            for (String pkg : pkgList) {
-                                if (appInfo.packageName.equals(pkg)) {
-                                    containsPackage = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (containsPackage) {
-                            // 获取PID
-                            java.lang.reflect.Field pidField = processInfoClass.getField("pid");
-                            appInfo.pid = (Integer) pidField.get(processInfo);
-
-                            // 获取内存信息
-                            int[] pids = {appInfo.pid};
-                            java.lang.reflect.Method getProcessMemoryInfoMethod = activityManagerClass.getMethod(
-                                    "getProcessMemoryInfo", int[].class);
-                            Object[] memoryInfos = (Object[]) getProcessMemoryInfoMethod.invoke(activityManager, new Object[]{pids});
-
-                            if (memoryInfos != null && memoryInfos.length > 0) {
-                                Object memoryInfo = memoryInfos[0];
-                                Class<?> memoryInfoClass = memoryInfo.getClass();
-
-                                // 获取PSS内存使用量
-                                java.lang.reflect.Method getTotalPssMethod = memoryInfoClass.getMethod("getTotalPss");
-                                int totalPss = (Integer) getTotalPssMethod.invoke(memoryInfo);
-                                appInfo.memoryUsageMB = totalPss / 1024; // 转换为MB
-                            }
-
-                            break;
-                        }
-                    }
-                }
-            }
-
-        } catch (Exception e) {
-            Logger.w(TAG, "Failed to get app memory usage via reflection: " + e.getMessage());
-        }
     }
 
 
     /**
-     * 通过反射获取前台应用包名
+     * 获取前台应用完整路径 (包名/Activity名)
      */
-    private String getForegroundAppPackageName() {
+    private String getForegroundAppPath() {
         try {
-            // 方法1: 通过ActivityManager获取运行任务
-            Class<?> activityManagerClass = Class.forName("android.app.ActivityManager");
-            Object activityManager = getSystemService("activity");
+            Process p = Runtime.getRuntime().exec(new String[]{
+                    "sh", "-c", "dumpsys activity activities"
+            });
+            BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            String line;
+            String targetLine = null;
 
-            if (activityManager != null) {
-                // 获取运行任务列表
-                java.lang.reflect.Method getRunningTasksMethod = activityManagerClass.getMethod("getRunningTasks", int.class);
-                @SuppressWarnings("unchecked")
-                java.util.List<Object> runningTasks = (java.util.List<Object>) getRunningTasksMethod.invoke(activityManager, 1);
+            // 读取所有行，寻找包含topResumedActivity的行
+            while ((line = br.readLine()) != null) {
+                if (line.contains("topResumedActivity=")) {
+                    targetLine = line.trim();
+                    break;
+                }
+            }
+            br.close();
+            p.waitFor();
 
-                if (runningTasks != null && !runningTasks.isEmpty()) {
-                    Object taskInfo = runningTasks.get(0);
-                    Class<?> taskInfoClass = taskInfo.getClass();
+            if (targetLine != null) {
+                // 解析格式: topResumedActivity=ActivityRecord{b945e78 u0 tv.danmaku.bilibilihd/tv.danmaku.bili.MainActivityV2 t85}
 
-                    // 获取topActivity字段
-                    java.lang.reflect.Field topActivityField = taskInfoClass.getField("topActivity");
-                    Object componentName = topActivityField.get(taskInfo);
+                int u0Index = targetLine.indexOf(" u0 ");
+                if (u0Index != -1) {
+                    int pathStart = u0Index + 4; // " u0 " 长度为4
+                    // 查找路径的结束位置 - 可能是空格或者右括号
+                    int pathEnd = targetLine.indexOf(" ", pathStart);
+                    if (pathEnd == -1) {
+                        pathEnd = targetLine.indexOf("}", pathStart);
+                    }
 
-                    if (componentName != null) {
-                        // 获取包名
-                        java.lang.reflect.Method getPackageNameMethod = componentName.getClass().getMethod("getPackageName");
-                        String packageName = (String) getPackageNameMethod.invoke(componentName);
-                        Logger.d(TAG, "Found foreground app via ActivityManager: " + packageName);
-                        return packageName;
+                    if (pathEnd != -1) {
+                        String fullPath = targetLine.substring(pathStart, pathEnd);
+                        return fullPath;
                     }
                 }
             }
-
         } catch (Exception e) {
-            Logger.w(TAG, "Failed to get foreground app via ActivityManager: " + e.getMessage());
+            Logger.e(TAG, "Error getting foreground app path", e);
         }
 
-        try {
-            // 方法2: 通过UsageStatsManager（需要系统权限）
-            Object usageStatsManager = getSystemService("usagestats");
-            if (usageStatsManager != null) {
-                Class<?> usageStatsManagerClass = Class.forName("android.app.usage.UsageStatsManager");
-                java.lang.reflect.Method queryUsageStatsMethod = usageStatsManagerClass.getMethod(
-                        "queryUsageStats", int.class, long.class, long.class);
-
-                long time = System.currentTimeMillis();
-                @SuppressWarnings("unchecked")
-                java.util.List<Object> appList = (java.util.List<Object>) queryUsageStatsMethod.invoke(
-                        usageStatsManager, 0, time - 1000 * 1000, time); // INTERVAL_DAILY = 0
-
-                if (appList != null && !appList.isEmpty()) {
-                    // 按最后使用时间排序
-                    Object mostRecentApp = null;
-                    long lastTimeUsed = 0;
-
-                    for (Object usageStats : appList) {
-                        Class<?> usageStatsClass = usageStats.getClass();
-                        java.lang.reflect.Method getLastTimeUsedMethod = usageStatsClass.getMethod("getLastTimeUsed");
-                        long timeUsed = (Long) getLastTimeUsedMethod.invoke(usageStats);
-
-                        if (timeUsed > lastTimeUsed) {
-                            lastTimeUsed = timeUsed;
-                            mostRecentApp = usageStats;
-                        }
-                    }
-
-                    if (mostRecentApp != null) {
-                        java.lang.reflect.Method getPackageNameMethod = mostRecentApp.getClass().getMethod("getPackageName");
-                        String packageName = (String) getPackageNameMethod.invoke(mostRecentApp);
-                        Logger.d(TAG, "Found foreground app via UsageStatsManager: " + packageName);
-                        return packageName;
-                    }
-                }
-            }
-
-        } catch (Exception e) {
-            Logger.w(TAG, "Failed to get foreground app via UsageStatsManager: " + e.getMessage());
-        }
-
-        return "";
-    }
-
-    /**
-     * 通过反射获取系统服务
-     */
-    private Object getSystemService(String serviceName) {
-        try {
-            Class<?> serviceManagerClass = Class.forName("android.os.ServiceManager");
-            java.lang.reflect.Method getServiceMethod = serviceManagerClass.getMethod("getService", String.class);
-            Object service = getServiceMethod.invoke(null, serviceName);
-
-            if (service != null) {
-                // 根据服务类型获取对应的Stub
-                String stubClassName = "";
-                switch (serviceName) {
-                    case "activity":
-                        stubClassName = "android.app.IActivityManager$Stub";
-                        break;
-                    case "package":
-                        stubClassName = "android.content.pm.IPackageManager$Stub";
-                        break;
-                    case "usagestats":
-                        stubClassName = "android.app.usage.IUsageStatsManager$Stub";
-                        break;
-                    default:
-                        return service;
-                }
-
-                Class<?> stubClass = Class.forName(stubClassName);
-                java.lang.reflect.Method asInterfaceMethod = stubClass.getMethod("asInterface", android.os.IBinder.class);
-                return asInterfaceMethod.invoke(null, service);
-            }
-
-        } catch (Exception e) {
-            Logger.w(TAG, "Failed to get system service " + serviceName + ": " + e.getMessage());
-        }
-
+        Logger.w(TAG, "无法解析前台应用路径");
         return null;
     }
-
-    /**
-     * 获取所有运行中的应用进程信息（通过Android API反射调用）
-     */
-    public List<SystemMonitor.ProcessInfo> getRunningProcesses() {
-        List<SystemMonitor.ProcessInfo> processes = new ArrayList<>();
-
-        try {
-            Object activityManager = getSystemService("activity");
-            if (activityManager != null) {
-                Class<?> activityManagerClass = Class.forName("android.app.IActivityManager");
-
-                // 获取运行进程列表
-                java.lang.reflect.Method getRunningAppProcessesMethod = activityManagerClass.getMethod("getRunningAppProcesses");
-                @SuppressWarnings("unchecked")
-                java.util.List<Object> runningProcesses = (java.util.List<Object>) getRunningAppProcessesMethod.invoke(activityManager);
-
-                if (runningProcesses != null) {
-                    for (Object processInfo : runningProcesses) {
-                        SystemMonitor.ProcessInfo info = new SystemMonitor.ProcessInfo();
-                        Class<?> processInfoClass = processInfo.getClass();
-
-                        // 获取进程信息
-                        java.lang.reflect.Field processNameField = processInfoClass.getField("processName");
-                        info.processName = (String) processNameField.get(processInfo);
-
-                        java.lang.reflect.Field pidField = processInfoClass.getField("pid");
-                        info.pid = (Integer) pidField.get(processInfo);
-
-                        java.lang.reflect.Field uidField = processInfoClass.getField("uid");
-                        info.uid = (Integer) uidField.get(processInfo);
-
-                        java.lang.reflect.Field importanceField = processInfoClass.getField("importance");
-                        info.importance = (Integer) importanceField.get(processInfo);
-
-                        // 判断是否为前台进程
-                        info.foreground = info.importance <= 100; // IMPORTANCE_FOREGROUND = 100
-
-                        // 获取包名（取第一个）
-                        java.lang.reflect.Field pkgListField = processInfoClass.getField("pkgList");
-                        String[] pkgList = (String[]) pkgListField.get(processInfo);
-                        if (pkgList != null && pkgList.length > 0) {
-                            info.packageName = pkgList[0];
-                        }
-
-                        // 获取内存使用情况
-                        getProcessMemoryUsageViaReflection(info, activityManager, activityManagerClass);
-
-                        processes.add(info);
-                    }
-                }
-            }
-
-        } catch (Exception e) {
-            Logger.e(TAG, "Error getting running processes via reflection: " + e.getMessage());
-        }
-
-        return processes;
-    }
-
-    /**
-     * 通过反射获取进程内存使用情况
-     */
-    private void getProcessMemoryUsageViaReflection(SystemMonitor.ProcessInfo processInfo, Object activityManager, Class<?> activityManagerClass) {
-        try {
-            int[] pids = {processInfo.pid};
-            java.lang.reflect.Method getProcessMemoryInfoMethod = activityManagerClass.getMethod(
-                    "getProcessMemoryInfo", int[].class);
-            Object[] memoryInfos = (Object[]) getProcessMemoryInfoMethod.invoke(activityManager, new Object[]{pids});
-
-            if (memoryInfos != null && memoryInfos.length > 0) {
-                Object memoryInfo = memoryInfos[0];
-                Class<?> memoryInfoClass = memoryInfo.getClass();
-
-                // 获取PSS内存使用量
-                java.lang.reflect.Method getTotalPssMethod = memoryInfoClass.getMethod("getTotalPss");
-                int totalPss = (Integer) getTotalPssMethod.invoke(memoryInfo);
-                processInfo.memoryUsage = totalPss; // PSS in KB
-            }
-
-        } catch (Exception e) {
-            Logger.w(TAG, "Failed to get process memory usage for PID " + processInfo.pid + ": " + e.getMessage());
-        }
-    }
-
 }

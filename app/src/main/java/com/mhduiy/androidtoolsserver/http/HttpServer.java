@@ -150,7 +150,7 @@ public class HttpServer {
                     }
                     coresJson.append("]");
 
-                    cpuJson.add("cores", coresJson.toString(), false); // false表示不加引号，直接作为JSON对象
+                    cpuJson.add("cores", coresJson.toString(), false); // 使用原始JSON字符串
                     cpuJson.add("temperature", cpuInfo.temperature);
                     cpuJson.add("maxFrequency", cpuInfo.maxFrequency);
                     cpuJson.add("minFrequency", cpuInfo.minFrequency);
