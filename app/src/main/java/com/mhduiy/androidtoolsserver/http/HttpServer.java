@@ -1,5 +1,6 @@
 package com.mhduiy.androidtoolsserver.http;
 
+import com.mhduiy.androidtoolsserver.monitor.AppMonitor;
 import com.mhduiy.androidtoolsserver.monitor.CPUMonitor;
 import com.mhduiy.androidtoolsserver.monitor.FrontendAppMonitor;
 import com.mhduiy.androidtoolsserver.monitor.GPUMonitor;
@@ -117,7 +118,26 @@ public class HttpServer {
         String contentType = "application/json";
 
         try {
-            switch (path) {
+            // 解析URL参数
+            String basePath = path;
+            Map<String, String> params = new HashMap<>();
+
+            if (path.contains("?")) {
+                String[] parts = path.split("\\?", 2);
+                basePath = parts[0];
+                String queryString = parts[1];
+
+                // 解析查询参数
+                String[] paramPairs = queryString.split("&");
+                for (String pair : paramPairs) {
+                    String[] keyValue = pair.split("=", 2);
+                    if (keyValue.length == 2) {
+                        params.put(keyValue[0], keyValue[1]);
+                    }
+                }
+            }
+
+            switch (basePath) {
                 case "/":
                 case "/status":
                     response = new JsonBuilder()
@@ -214,6 +234,53 @@ public class HttpServer {
 
                 case "/battery":
                     response = JsonBuilder.fromObject(systemMonitor.getBatteryInfo());
+                    break;
+
+                case "/apps":
+                    List<AppMonitor.AppBaseInfo> allApps;
+
+                    // 检查是否只需要用户应用
+                    if ("true".equals(params.get("isUser"))) {
+                        allApps = systemMonitor.getAllApps(true);
+                    } else {
+                        allApps = systemMonitor.getAllApps(false);
+                    }
+
+                    StringBuilder appsJson = new StringBuilder();
+                    appsJson.append("[");
+
+                    for (int i = 0; i < allApps.size(); i++) {
+                        AppMonitor.AppBaseInfo info = allApps.get(i);
+                        if (i > 0) appsJson.append(",");
+
+                        JsonBuilder appJson = new JsonBuilder();
+                        appJson.add("packageName", info.packageName);
+                        appJson.add("appName", info.appName);
+                        appJson.add("versionName", info.versionName);
+                        appJson.add("versionCode", info.versionCode);
+                        appJson.add("isSystemApp", info.isSystemApp);
+                        appJson.add("isEnabled", info.isEnabled);
+                        appJson.add("firstInstallTime", info.firstInstallTime);
+                        appJson.add("lastUpdateTime", info.lastUpdateTime);
+
+                        appsJson.append(appJson.build());
+                    }
+
+                    appsJson.append("]");
+                    response = appsJson.toString();
+                    break;
+
+                case "/appIcon":
+                    String packageName = params.get("packageName");
+                    if (packageName == null || packageName.isEmpty()) {
+                        sendErrorResponse(writer, 400, "Bad Request: Missing packageName parameter");
+                        return;
+                    }
+                    String iconBase64 = AppMonitor.getIconBase64(packageName);
+                    JsonBuilder iconJson = new JsonBuilder();
+                    iconJson.add("packageName", packageName);
+                    iconJson.add("iconBase64", iconBase64);
+                    response = iconJson.build();
                     break;
 
                 case "/system":

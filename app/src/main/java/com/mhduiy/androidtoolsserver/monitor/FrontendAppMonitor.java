@@ -2,6 +2,7 @@ package com.mhduiy.androidtoolsserver.monitor;
 
 import com.mhduiy.androidtoolsserver.util.Logger;
 import com.mhduiy.androidtoolsserver.util.ContextManager;
+import com.mhduiy.androidtoolsserver.util.Utils;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -103,7 +104,7 @@ public class FrontendAppMonitor {
             Drawable icon = pm.getApplicationIcon(appInfo.packageName);
             Logger.d(TAG, "Icon type: " + icon.getClass().getSimpleName());
 
-            String iconBase64 = drawableToBase64(icon);
+            String iconBase64 = Utils.drawableToBase64(icon);
             if (iconBase64 != null) {
                 appInfo.iconBase64 = iconBase64;
             } else {
@@ -112,63 +113,6 @@ public class FrontendAppMonitor {
 
         } catch (Exception e) {
             Logger.w(TAG, "Failed to get app details: " + e.getMessage());
-        }
-    }
-
-    /**
-     * 将Drawable转换为Base64字符串，支持多种类型的Drawable
-     */
-    private String drawableToBase64(Drawable drawable) {
-        if (drawable == null) {
-            return null;
-        }
-
-        try {
-            Bitmap bitmap = null;
-
-            // 处理不同类型的Drawable
-            if (drawable instanceof BitmapDrawable) {
-                // BitmapDrawable类型
-                BitmapDrawable bitmapDrawable = (BitmapDrawable) drawable;
-                bitmap = bitmapDrawable.getBitmap();
-                if (bitmap != null) {
-                    Logger.d(TAG, "BitmapDrawable - size: " + bitmap.getWidth() + "x" + bitmap.getHeight());
-                }
-            } else {
-                // 其他类型的Drawable（包括AdaptiveIconDrawable）
-                // 通过Canvas绘制到Bitmap
-                int width = drawable.getIntrinsicWidth();
-                int height = drawable.getIntrinsicHeight();
-
-                // 设置默认尺寸，防止无效尺寸
-                if (width <= 0 || height <= 0) {
-                    width = height = 144; // 默认144x144像素
-                }
-
-                Logger.d(TAG, "Non-BitmapDrawable (" + drawable.getClass().getSimpleName() + ") - creating bitmap: " + width + "x" + height);
-
-                bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-                Canvas canvas = new Canvas(bitmap);
-                drawable.setBounds(0, 0, width, height);
-                drawable.draw(canvas);
-            }
-
-            if (bitmap == null) {
-                Logger.w(TAG, "Failed to get bitmap from drawable");
-                return null;
-            }
-
-            // 转换为Base64
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos);
-            byte[] bytes = baos.toByteArray();
-
-            Logger.d(TAG, "Bitmap compressed to " + bytes.length + " bytes");
-            return Base64.encodeToString(bytes, Base64.NO_WRAP);
-
-        } catch (Exception e) {
-            Logger.e(TAG, "Error converting drawable to base64: " + e.getMessage(), e);
-            return null;
         }
     }
 

@@ -10,6 +10,7 @@ public class SystemMonitor {
     private final MemoryMonitor memoryMonitor = new MemoryMonitor();
     private final FrontendAppMonitor frontendAppMonitor = new FrontendAppMonitor();
     private final BatteryMonitor batteryMonitor = new BatteryMonitor();
+    private final AppMonitor appMonitor = new AppMonitor();
     private static final String TAG = "SystemMonitor";
 
     public SystemMonitor() {
@@ -53,6 +54,10 @@ public class SystemMonitor {
 
     public BatteryMonitor.BatteryInfo getBatteryInfo() {
         return batteryMonitor.getInfo();
+    }
+
+    public List<AppMonitor.AppBaseInfo> getAllApps(Boolean isUser) {
+        return isUser ? appMonitor.getUserApps() : appMonitor.getAllApps();
     }
 
     /**
