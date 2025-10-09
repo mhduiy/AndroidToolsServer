@@ -150,4 +150,34 @@ public class JsonBuilder {
         }
         return builder.build();
     }
+
+    public static String fromObject(Object obj) {
+        // 这里可以使用反射将对象的字段转换为JSON字符串
+        // 简单示例，实际使用中可能需要更复杂的处理
+        JsonBuilder builder = new JsonBuilder();
+        try {
+            for (java.lang.reflect.Field field : obj.getClass().getDeclaredFields()) {
+                field.setAccessible(true);
+                Object value = field.get(obj);
+                if (value instanceof String) {
+                    builder.add(field.getName(), (String) value);
+                } else if (value instanceof Integer) {
+                    builder.add(field.getName(), (Integer) value);
+                } else if (value instanceof Long) {
+                    builder.add(field.getName(), (Long) value);
+                } else if (value instanceof Double) {
+                    builder.add(field.getName(), (Double) value);
+                } else if (value instanceof Boolean) {
+                    builder.add(field.getName(), (Boolean) value);
+                } else if (value instanceof List) {
+                    builder.add(field.getName(), (List<?>) value);
+                } else if (value instanceof Map) {
+                    builder.add(field.getName(), (Map<String, Object>) value);
+                }
+            }
+        } catch (IllegalAccessException e) {
+            e.printStackTrace();
+        }
+        return builder.build();
+    }
 }

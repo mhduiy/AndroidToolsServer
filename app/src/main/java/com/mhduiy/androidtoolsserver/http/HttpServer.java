@@ -212,6 +212,10 @@ public class HttpServer {
                     response = currentAppJson.build();
                     break;
 
+                case "/battery":
+                    response = JsonBuilder.fromObject(systemMonitor.getBatteryInfo());
+                    break;
+
                 case "/system":
                 case "/summary":
                     Map<String, Object> summary = systemMonitor.getSystemSummary();

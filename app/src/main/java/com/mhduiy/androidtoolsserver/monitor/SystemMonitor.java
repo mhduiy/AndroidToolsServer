@@ -8,8 +8,8 @@ public class SystemMonitor {
     private final CPUMonitor cpuMonitor = new CPUMonitor();
     private final GPUMonitor gpuMonitor = new GPUMonitor();
     private final MemoryMonitor memoryMonitor = new MemoryMonitor();
-
     private final FrontendAppMonitor frontendAppMonitor = new FrontendAppMonitor();
+    private final BatteryMonitor batteryMonitor = new BatteryMonitor();
     private static final String TAG = "SystemMonitor";
 
     public SystemMonitor() {
@@ -49,6 +49,10 @@ public class SystemMonitor {
 
     public FrontendAppMonitor.FrontendAppInfo getFrontendAppInfo() {
         return frontendAppMonitor.getInfo();
+    }
+
+    public BatteryMonitor.BatteryInfo getBatteryInfo() {
+        return batteryMonitor.getInfo();
     }
 
     /**
